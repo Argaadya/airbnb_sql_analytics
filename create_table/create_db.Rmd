@@ -69,13 +69,13 @@ After you have set up the mysql server, now you can connect into the server with
 - password
 - database name (dbname)
 
-```{r eval=FALSE}
+```{r eval=F}
 mydb <- dbConnect(MySQL(),
                   host = "db4free.net", # write "localhost" if you use a localhost
                   port = 3306,
-                  user = "your_username",
-                  password = "your_password",
-                  dbname = "your_database"
+                  user = "your_name",
+                  password = "your_pass",
+                  dbname = "your_dbname"
 )
 ```
 
@@ -114,7 +114,7 @@ query
 
 You can send the query by using the `dbSendQuery()`.
 
-```{r eval=FALSE}
+```{r}
 dbSendQuery(mydb, # your connection
             query # SQL query
             )
@@ -142,7 +142,7 @@ If you want to delete the table, you can run the following query.
 
 > DROP TABLE table_name
 
-```{r eval=FALSE}
+```{r}
 dbSendQuery(mydb, "DROP TABLE dummy_customer")
 ```
 
@@ -689,30 +689,7 @@ out_db
 
 ### Insert Data to Listing Table
 
-Now we will insert each row into the table using the same function that we have defined earlier.
-
-```{r}
-df_new_listing %>% 
-  filter(description %>% str_detect("1 bedroom size 30 sq.m ,washing machine ,wifi, kitchen.living room,swiiming pool") ) %>% 
-  pull(description) %>% 
-  .[1]
-```
-
-```{r}
-df_new_listing %>% 
-  filter(description %>% str_detect("1 bedroom size 30 sq.m ,washing machine ,wifi, kitchen.living room,swiiming pool") ) %>% 
-  slice(1) %>% 
-  mutate_if(is.character, function(x) ifelse(is.na(x), NA,  x %>% 
-                                               str_replace_all('"', "'") %>% # Replace all "" into '' in a string before joining
-                                               paste0('"', . , '"') 
-                                              )
-            ) %>% 
-  unlist() %>% 
-  paste(collapse = ", ") %>% 
-  str_remove_all("\\\\")
-```
-
-Unfortunately, MySQL has maximum allowed packet that goes in a single query. You can check with the following query. 
+Now we will insert each row into the table using the same function that we have defined earlier. Unfortunately, MySQL has maximum allowed packet that goes in a single query. You can check with the following query. 
 
 ```{r}
 # sent query
