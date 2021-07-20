@@ -1,0 +1,774 @@
+---
+title: "Airbnb Data Analytics"
+author: "Arga Adyatama"
+date: "7/20/2021"
+output: 
+  html_document:
+    df_print: paged
+    toc: true
+    toc_float: true
+    highlight: zenburn
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = F, warning = F, fig.align = "center")
+```
+
+In our [previous post](https://rpubs.com/Argaadya/create_table_sql), we have wrote on how to connect to MySQL Server and insert you data into the database. In this article, we will explore the data using SQL query in R.
+
+You can check the source code and the python version of this post in [my repository](https://github.com/Argaadya/airbnb_sql_analytics).
+
+The following is the list of libraries that we will use throughout the article.
+
+```{r message=FALSE}
+# Data Wrangling
+library(tidyverse)
+
+# Draw Map
+library(leaflet)
+library(scales)
+
+# MySQL
+library(RMySQL)
+
+# ggplot theme
+theme_set(theme_minimal())
+
+options(scipen = 999)
+```
+
+# Connect to MySQL Server
+
+Let's first connect to the MySQL Server that we have set up previously.
+
+```{r eval=FALSE}
+mydb <- dbConnect(MySQL(),
+                  host = "db4free.net", # write "localhost" if you use a localhost
+                  port = 3306,
+                  user = "your_name",
+                  password = "your_password",
+                  dbname = "your_database"
+                  )
+```
+
+Let's check the available tables in our database.
+
+```{r}
+# Execute query
+res <- dbSendQuery(mydb, "SHOW TABLES")
+  
+# Fetch the result
+out_db <- fetch(res)
+
+# Clear resource
+dbClearResult(res)
+
+out_db
+```
+
+We currently have 2 different tables with the following properties:
+
+- `listing`: Information about room listing of Airbnb in Bangkok, Thailand
+- `host_info`: Information about host of Airbnb in Bangkok, Thailand
+
+# Research Question
+
+It's better for us to define what kind of insight that we want to draw from the database. Here, I define my research questions. These questions just to give you the illustration on how to do data analysis, so they may not deep enough to give any recommendation. You can come up with your questions as well.
+
+## Room Listing
+
+- What is the most common room type available?
+- What is the top and bottom 10 property type based on average price?
+- What is the top and bottom 10 property type based on review score?
+- What is the most common amenities provided?
+- Is there any correlation between room price and the review score?
+- Room listing geographical distribution
+
+## Host
+
+- Who are the top 10 host based on revenue?
+- Is there any difference in review score between superhost and normal host?
+- Is there any difference in response rate between superhost and normal host?
+- What is the most commonly verified host information?
+
+# Room Listing
+
+## Common Room Type
+
+Let's start with our first question, what is the most common room type and property type available? We can acquire this information from the `listing` table.
+
+First, let's check how many room listing we have. We can use `COUNT(*)` to get the number of data/rows from the table `listing`. We rename the result as *frequency*.
+
+```{r}
+res <- dbSendQuery(mydb,
+                   "SELECT COUNT(*) as frequency FROM listing"
+                   )
+
+out_db <- fetch(res)
+dbClearResult(res)
+
+out_db
+```
+
+Now let's check the number of data for each *Room type*.
+
+We can use the `COUNT(*)` to count the number of rows and use `GROUP BY` to group the data based on the room type. To get the top 15, we need to arrange the data by using `ORDER BY` and set the sorting to descending (from largest to smallest) using the `DESC`. 
+
+```{r}
+res <- dbSendQuery(mydb,
+                   "SELECT room_type, COUNT(*) as frequency
+                   FROM listing
+                   GROUP BY room_type
+                   ORDER BY COUNT(*) DESC"
+                   )
+
+out_db <- fetch(res)
+dbClearResult(res)
+
+out_db
+```
+
+Let's create a simple bar chart to visualize this result. We will use `ggplot` to create the plot.
+
+```{r}
+out_db %>% 
+  ggplot(aes(x = frequency, 
+             y = room_type %>% reorder(frequency))
+         ) +
+  geom_col(fill = "skyblue") +
+  labs(x = "Frequency",
+       y = "Room Type",
+       title = "Room Type by Frequency in Bangkok, Thailand")
+```
+
+The most common listing available is either entire home or apartment, followed by private room. Some hotels are also listing their room in Airbnb apparently.
+
+## Common Property Type
+
+Let's get the top 15 property type from the data. Property type is the more granular and more detailed version from the room type.
+
+We can use the `COUNT(*)` to count the number of rows and use `GROUP BY` to group the data based on the property type. To get the top 15, we need to arrange the data by using `ORDER BY` and set the sorting to descending (from largest to smallest) using the `DESC`. Finally, we limit the data to take only the first 15 row using the `LIMIT`.
+
+```{r}
+res <- dbSendQuery(mydb,
+                   "SELECT property_type, COUNT(*) as frequency
+                   FROM listing
+                   GROUP BY property_type
+                   ORDER BY COUNT(*) DESC
+                   LIMIT 15"
+                   )
+
+out_db <- fetch(res)
+dbClearResult(res)
+
+out_db
+```
+
+Let's create a simple bar chart to visualize this result. We will use `ggplot` to create the plot.
+
+```{r}
+out_db %>% 
+  ggplot(aes(x = frequency, 
+             y = property_type %>% reorder(frequency))
+         ) +
+  geom_col(fill = "skyblue") +
+  labs(x = "Frequency",
+       y = "Property Type",
+       title = "Property Type by Frequency in Bangkok, Thailand")
+```
+
+## Property Type by Average Price
+
+Does apartment and condominium become popular choice because they are the cheapest option out there for the host to offer? To answer this question, let's check the top 10 and bottom 10 property type based on the average price for a property type with at least 50 different listings. 
+
+```{r}
+# Top 10 Property Based on Price
+res <- dbSendQuery(mydb,
+                   "SELECT property_type, average_price, frequency
+                   FROM 
+                      (SELECT property_type, AVG(price) as average_price, COUNT(*) as frequency
+                      FROM listing
+                      GROUP BY property_type
+                      ) as new_table
+                   WHERE frequency >= 50
+                   ORDER BY average_price DESC
+                   LIMIT 10"
+                   )
+
+df_top10 <- fetch(res)
+
+# add information to indicate top 10
+df_top10 <- df_top10 %>% 
+  mutate(type = "Top 10")
+dbClearResult(res)
+
+# Bottom 10 Property Based on Price
+res <- dbSendQuery(mydb,
+                   "SELECT property_type, average_price, frequency
+                   FROM 
+                      (SELECT property_type, AVG(price) as average_price, COUNT(*) as frequency
+                      FROM listing
+                      GROUP BY property_type
+                      ) as new_table
+                  WHERE frequency >= 50
+                  ORDER BY average_price
+                  LIMIT 10"
+                   )
+
+df_bottom10 <- fetch(res)
+
+# add information to indicate top 10
+df_bottom10 <- df_bottom10 %>% 
+  mutate(type = "Bottom 10")
+dbClearResult(res)
+
+# Bind row the dataframe
+df_price_rank <- df_top10 %>% 
+  bind_rows(df_bottom10)
+```
+
+Let's visualize the data.
+
+```{r}
+df_price_rank %>% 
+  ggplot(aes(x = average_price, 
+             y = property_type %>% reorder(average_price),
+             fill = type)
+         ) + 
+  geom_col() +
+  scale_fill_manual(values = c("firebrick", "skyblue")) +
+  labs(x = "Average Price",
+       y = NULL,
+       fill = NULL,
+       title = "Top and Bottom 10 Property by Average Price",
+       subtitle = "For property type with min. 50 different listings") 
+```
+
+The most expensive property that is being listed is the entire villa, followed by entire house. Surprisingly, shared room in house has higher average price compared to other property. Meanwhile, on the bottom 10 the list is dominated by listing for private and shared room. However, we don't see listing for private room or entire apartment/condominium in the top and bottom 10, so we may conclude that the price for those listings is somewhere in the middle.
+
+## Property Type by Review Score
+
+According to [Airbnb](https://www.airbnb.com/help/article/1257/star-ratings), there are several star ratings available for the user to measure how good the service given by the listing. Several rating that we can use including:
+
+- **Overall experience**: How was it?
+- **Cleanliness**: Did the place meet our standards?
+- **Accuracy**: Was it accurately represented with up-to-date photos and info?
+- **Check-in**: Should be easy
+- **Communication**: Did the Host respond to messages promptly?
+- **Location**: Was the guest made aware of safety, transportation, points of interest and special considerations like noise or other situations that might affect their stay?
+- **Value**: Was it worth the price?
+
+First, let's check if there are significant difference in average of rating of the overall experience for certain property type. Some listing may don't have any rating yet, so we will filter data that has non-NULL rating and select only property type with at least 50 different listing.
+
+```{r}
+# Top 10 Property Based on Review Score
+res <- dbSendQuery(mydb,
+                   "SELECT property_type, average_score, frequency
+                   FROM 
+                      (SELECT property_type, AVG(review_scores_rating) as average_score, COUNT(*) as frequency
+                      FROM listing
+                      WHERE review_scores_rating IS NOT NULL
+                      GROUP BY property_type
+                      ) as new_table
+                  WHERE frequency >= 50
+                  ORDER BY average_score DESC
+                  LIMIT 10"
+                   )
+
+df_top10 <- fetch(res)
+
+# add information to indicate top 10
+df_top10 <- df_top10 %>% 
+  mutate(type = "Top 10")
+dbClearResult(res)
+
+# Bottom 10 Property Based on Review Score
+res <- dbSendQuery(mydb,
+                   "SELECT property_type, average_score, frequency
+                   FROM 
+                      (SELECT property_type, AVG(review_scores_rating) as average_score, COUNT(*) as frequency
+                      FROM listing
+                      WHERE review_scores_rating IS NOT NULL
+                      GROUP BY property_type
+                      ) as new_table
+                  WHERE frequency >= 50
+                  ORDER BY average_score
+                  LIMIT 10"
+                   )
+
+df_bottom10 <- fetch(res)
+
+# add information to indicate top 10
+df_bottom10 <- df_bottom10 %>% 
+  mutate(type = "Bottom 10")
+dbClearResult(res)
+
+# Bind row the dataframe
+df_score_rank <- df_top10 %>% 
+  bind_rows(df_bottom10)
+```
+
+```{r}
+df_score_rank %>% 
+  ggplot(aes(x = average_score, 
+             y = property_type %>% reorder(average_score),
+             color = type)
+         ) + 
+  geom_point() +
+  geom_segment(aes(xend = 80, yend = property_type)) +
+  labs(x = "Average Price",
+       y = NULL,
+       color = NULL,
+       title = "Top and Bottom 10 Property by Average Price",
+       subtitle = "For property type with min. 50 different listings") 
+```
+
+`Entire loft` and `Entire townhouse` become the top listings with the highest overall experience, reflected by the average review scores rating. `Entire apartment` and `Entire condominium` are also present as well as the top 10 overall experience. The listings with the least overall experience belong to `Room in aparthotel` and `Room in hotel`. Despite being one of the most expensive listing, people generally have lower overall experience rating for `Room in hotel` compared to other listing.
+
+## Correlation Between Price and Overall Experience
+
+Let's check whether listing with higher price will give higher overall experience as well using simple scatterplot. We will scale the listing price to log10 units. We only collect listing with non-NULL value for the review scores rating. We will also filter the data by collecting listing that has more than 10 number of reviews.
+
+```{r}
+res <- dbSendQuery(mydb,
+                   "SELECT price, review_scores_rating
+                   FROM listing
+                   WHERE review_scores_rating IS NOT NULL AND number_of_reviews > 10"
+                   )
+
+out_db <- fetch(res, n = -1) # Fetch all rows (not limited)
+dbClearResult(res)
+
+out_db
+```
+
+```{r}
+set.seed(123)
+out_db %>% 
+  ggplot(aes(x = price,
+             y = review_scores_rating)) +
+  geom_jitter(color = "dodgerblue4", alpha = 0.5) +
+  scale_x_log10(label = number_format(big.mark = ",")) +
+  labs(x = "Price",
+       y = "Review Scores Rating",
+       title = "Price vs Overall Experience (Rating)")
+```
+
+Most of the listing room has price higher than 300 bhat (2.5 in log10 scale), but there is one room that has price lower than 300 bhat and has high review scores rating. Based on the distribution, no listing room has overall experience lower than 80 for listing room with price higher than 10,000 bhat (4 in log10 scale). For price ranging from 300 bhat to 10,000 bhat, there is no correlation between price and overall experience. However, as the price goes up, people tend to be give higher rating. 
+
+## Amenities 
+
+Let's continue by checking the most common amenities that is included for the given service.
+
+```{r}
+res <- dbSendQuery(mydb,
+                   "SELECT amenities, review_scores_rating, price
+                   FROM listing"
+                   )
+
+out_db <- fetch(res, n = -1)
+dbClearResult(res)
+
+out_db %>% 
+  head()
+```
+
+The amenities is still in a long string format. To process this data, we will split the string into individual amenities indicated by the comma. To prevent the possibility of mistyping or other free text error, we will convert all alphabets into lowercase.
+
+```{r}
+out_db <- out_db %>% 
+  mutate(amenities = tolower(amenities))
+
+out_db %>% 
+  head()
+```
+
+Let's start collecting all amenities.
+
+```{r}
+list_amenities <- map(out_db$amenities, function(x) x %>% strsplit(", ") %>% unlist() ) %>% 
+  unlist()
+
+df_amenities <- data.frame(amenities = list_amenities)
+
+head(df_amenities)
+```
+
+After all amenities are collected, it's time to create a dataframe that consists of the amenities and it's respective frequency. We will normalize the frequency into percentage to reflect of all listing available, what percentage of listing use the mentioned amenities.
+
+```{r}
+# Prepare top 15 amenities by ratio
+df_viz <- df_amenities %>% 
+  count(amenities, name = "frequency") %>% 
+  mutate(n_data = nrow(out_db),
+         ratio = frequency/nrow(out_db)) %>% 
+  arrange(desc(ratio)) %>% 
+  head(15)
+
+# Visualization
+df_viz %>% 
+  ggplot(aes(x = ratio,
+             y = amenities %>% reorder(ratio))
+         ) +
+  geom_col(fill = "skyblue") +
+  labs(x = "Percentage of Listing",
+       y = "Amenities",
+       title = "Most Common Amenities")
+```
+
+Almost all of the available listing has `Air conditioning` and `Long term stays allowed`, followed by `Essentials`, `Wifi`, and `TV`. More than 60% of all listing also has `Dedicated workspace` and `Kitchen`, which may require more spaces outside the bedroom. According to [Airbnb](https://www.airbnb.com/help/article/2343/what-are-essential-amenities), essentials amenities including:
+
+- Toilet paper
+- Soap (for hands and body)
+- One towel per guest
+- One pillow per guest
+- Linens for each guest bed
+
+Essential amenities are the basic items that a guest expects in order to have a comfortable stay. So we can check the distribution of the overall experience from listing with and without `Essentials` amenities.
+
+```{r}
+df_viz <- out_db %>% 
+  filter(!is.na(review_scores_rating)) %>% 
+  mutate(has_essential = str_detect(amenities, "essentials"))
+```
+
+We will visualize the data using boxplot for each category.
+
+```{r}
+df_viz %>% 
+  ggplot(aes(x = has_essential,
+             y = review_scores_rating,
+             fill = has_essential)) +
+  geom_boxplot() +
+  labs(x = "Does the Listing Provide Essentials Amenities?",
+       y = "Review Scores Rating",
+       title = "Distribution of Review Scores Rating") +
+  theme(legend.position = "none")
+```
+
+Listing room that has `Essentials` included in the amenities tend to have slightly higher review scores rating based on the median (the middle line from the box) compared to listing that does not include `Essentials`.
+
+## Listing Map
+
+Let's now draw map and see the distribution of the room listing based on the geopgrahic location using the `folium` package. We may also want to give the information about the name of the host for the popup of the map. Therefore, we need to join our `listing table` with the `host_info` table and get name host name.
+
+Since visualizing a large number of marker/listing to the map will take a long time, in this part I restrict to only show the first 5,000 listings.
+
+```{r}
+res <- dbSendQuery(mydb,
+                   "SELECT id, name, listing_url, latitude, longitude, price, review_scores_rating, number_of_reviews, neighbourhood_cleansed, listing.host_id, host_info.host_name
+                   FROM listing
+                   LEFT JOIN host_info
+                   ON listing.host_id = host_info.host_id
+                   LIMIT 5000"
+                   )
+
+out_db <- fetch(res, n = -1)
+dbClearResult(res)
+```
+
+Some listing may not have a host name or even the name for the listing, therefore we will modify the value. We will fill missing value from the host name and name column with the string *No Host Name* and *No Name*.
+
+```{r}
+df_viz <- out_db %>% 
+  replace_na(list(name = "No Name", host_name = "No Host Name"))
+```
+
+Now we will draw the map. We will also create a custom popup where we can put several information for each listing. 
+
+```{r}
+popup <- paste0("<b>", df_viz$name, "</b><br>",
+                "Listing ID: ", df_viz$id, "<br>",
+                "Host Name: ", df_viz$host_name, "<br>",
+                "Price: ", df_viz$price, "<br>",
+                "Review Scores Rating: ", ifelse(is.na(df_viz$review_scores_rating), "No Review Yet", df_viz$review_scores_rating) , "<br>",
+                "Number of Reviews: ", df_viz$number_of_reviews, "<br>",
+                "<a href=", df_viz$listing_url, "> Click for more info</a>"
+                )
+
+leaflet(data = df_viz) %>% 
+  addTiles() %>% 
+  addMarkers(lng = ~longitude,
+             lat = ~latitude, 
+             popup = popup, 
+             clusterOptions = markerClusterOptions())
+```
+
+# Host
+
+We will continue answering the research question by looking at the host data.
+
+## Top Host by Earning
+
+We will see who is the top host based on the total earning cumulated from his/her listings. We will use the following formula to calculate the total earning:
+
+$$
+Total\ earning = \Sigma_{i=1}^n price_i\times number\ of\ reviews_i \times minimum\ nights_i
+$$
+
+Notes:
+
+- n: Number of listing for the host
+- price: Price of ith listing from the host
+- number of reviews: Number of reviews of ith listing
+- minimum nights: Minimum night of stay of ith listing
+
+Unfortunately, we don't have the detailed data on the number of stay for each customer, so we will use the minimum nights as the number of stay so what we actually calculate is the minimum total earning. We use the number of reviews as the proxy of number of customers.
+
+```{r}
+res <- dbSendQuery(mydb,
+                   "SELECT host_id, host_name, SUM(total_earning) as total_earning, COUNT(*) as number_of_listing, AVG(price) as average_price
+                   FROM
+                      (SELECT listing.host_id, host_info.host_name, price, number_of_reviews, minimum_nights, 
+                      price * number_of_reviews * minimum_nights as total_earning
+                      FROM listing
+                      LEFT JOIN host_info
+                      ON listing.host_id = host_info.host_id
+                      WHERE host_name IS NOT NULL
+                      ) as new_table
+                  GROUP BY host_id, host_name
+                  ORDER BY SUM(total_earning) DESC"
+                  )
+
+out_db <- fetch(res, n = -1)
+dbClearResult(res)
+
+out_db %>% 
+  head()
+```
+
+Now we will visualize the top host based on the number of listing for the start, see if some hosts has higher number of listing than others.
+
+```{r}
+# Get top 15 host by number of listing
+df_viz <- out_db %>% 
+  arrange(desc(number_of_listing)) %>% 
+  head(15)
+
+df_viz %>% 
+  ggplot(aes(x = number_of_listing,
+             y = host_name %>% reorder(number_of_listing))
+         ) +
+  geom_col(fill = "skyblue") +
+  labs(x = "Number of Listing",
+       y = "Host Name",
+       title = "Top Host by Number of Listing")
+```
+
+Only a handful of hosts has more than 5 listings. Now we will continue looking at the top 15 based on the Total Earning generated.
+
+```{r}
+# Get top 15 host by total earning
+df_viz <- out_db %>% 
+  arrange(desc(total_earning)) %>% 
+  head(15)
+
+df_viz %>% 
+  ggplot(aes(x = total_earning,
+             y = host_name %>% reorder(total_earning))
+         ) +
+  geom_col(fill = "skyblue") +
+  labs(x = "Total Earning (in Baht)",
+       y = "Host Name",
+       title = "Top Host by Total Earning") +
+  scale_x_continuous(labels = number_format(big.mark = ","))
+```
+
+So, the list of host name is different from the top host by the number of listing and the top host by total earning. This indicates that a higher number of listings doesn't guarantee to give more earnings.
+
+Does higher average price of listing from a single host correlate with higher total earning? Let's answer this questions using scatterplot.
+
+```{r}
+set.seed(123)
+out_db %>% 
+  ggplot(aes(x = average_price,
+             y = total_earning)) +
+  geom_jitter(color = "dodgerblue4", alpha = 0.5) +
+  scale_x_continuous(labels = number_format(big.mark = ",")) +
+  scale_y_continuous(labels = number_format(big.mark = ",")) +
+  labs(x = "Average Price",
+       y = "Total Earning",
+       title = "Average Price vs Total Earning")
+```
+
+As we can see, there is no visible pattern between average price and total earning. However, some of the most highest total earnings are generated by host with relatively low average price from his/her listings. Therefore, higher average price from a host doesn't guarantee to give him/her a higher total earning
+
+## Superhost
+
+According to [Airbnb](https://www.airbnb.com/help/article/828/what-is-a-superhost), superhosts are experienced hosts who provide a shining example for other hosts, and extraordinary experiences for their guests.
+
+In here we are interested to check if there is any difference in the distribution of review scores for listing owned by a superhost and normal host.
+
+```{r}
+res <- dbSendQuery(mydb,
+                   "SELECT review_scores_rating, listing.host_id, host_info.host_name, host_info.host_is_superhost
+                   FROM listing
+                   LEFT JOIN host_info
+                   ON listing.host_id = host_info.host_id
+                   WHERE review_scores_rating IS NOT NULL AND host_is_superhost IS NOT NULL"
+                   )
+
+out_db <- fetch(res, n = -1)
+dbClearResult(res)
+
+# Transform is_superhost into logical
+out_db <- out_db %>% 
+  mutate(host_is_superhost = as.logical(host_is_superhost))
+
+out_db %>% 
+  head()
+```
+
+```{r}
+out_db %>% 
+  ggplot(aes(x = review_scores_rating,
+             fill = host_is_superhost)) +
+  geom_density(alpha = 0.5) +
+  labs(x = "Review Scores Rating",
+       fill = "Is Superhost",
+       title = "Score Distribution Between Superhost and Normal Host") +
+  theme(legend.position = "top")
+```
+
+Both superhost and normal host has the same peak for the distribution, indicating that on average there is no significant difference on review scores rating or the overall experience. However, superhosts has thinner distribution, indicating that superhost tend to have higher review score due to low variability.
+
+Now we will look at the response rate and the acceptance rate between normal host and the superhost. The following is the detail description about response rate and acceptance rate according to [Airbnb](https://www.airbnb.com/resources/hosting-homes/a/understanding-response-rate-and-acceptance-rate-86):
+
+- Your response rate measures how consistently you respond within 24 hours to guest inquiries and booking requests. 
+- Your acceptance rate measures how often you accept or decline reservations. Guest inquiries are not included in the calculation of your acceptance rate. 
+
+```{r}
+res <- dbSendQuery(mydb,
+                   "SELECT host_id, host_name, host_response_rate, host_acceptance_rate, host_is_superhost
+                   FROM host_info
+                   WHERE host_response_rate IS NOT NULL and host_acceptance_rate IS NOT NULL"
+                   )
+
+out_db <- fetch(res, n = -1)
+dbClearResult(res)
+```
+
+We need to transform the response rate and acceptance rate to be a proper numeric values by removing the percentage character.
+
+```{r}
+out_db <- out_db %>% 
+  mutate(host_is_superhost = as.logical(host_is_superhost), # Transform is_superhost into logical
+         
+         # Transform acceptance rate and response rate
+         host_response_rate = host_response_rate %>% 
+           str_remove("[%]") %>% 
+           as.numeric(),
+         host_acceptance_rate = host_acceptance_rate %>% 
+           str_remove("[%]") %>% 
+           as.numeric()
+         )
+
+head(out_db)
+```
+
+Let's see the distribution of the response rate and acceptance rate.
+
+```{r}
+out_db %>% 
+  ggplot(aes(x = host_response_rate,
+             fill = host_is_superhost)) +
+  geom_density(alpha = 0.5) +
+  labs(x = "Response Rate",
+       fill = "Is Superhost",
+       title = "Response Rate Distribution Between Superhost and Normal Host") +
+  theme(legend.position = "top")
+```
+
+```{r}
+out_db %>% 
+  ggplot(aes(x = host_acceptance_rate,
+             fill = host_is_superhost)) +
+  geom_density(alpha = 0.5) +
+  labs(x = "Acceptance Rate",
+       fill = "Is Superhost",
+       title = "Response Rate Distribution Between Superhost and Normal Host") +
+  theme(legend.position = "top")
+```
+
+Based on plots above, the distribution of response rate and acceptance rate is the same, indicating that there is no signficant difference between a normal host and a superhost.
+
+## Host Verification
+
+When you host on Airbnb, you may be asked to provide information such as your legal name, date of birth, or government ID so it can then be verified. This is a mandatory step for a host to prevent fraud and other financial crimes. Let's deep dive into what kind of informations are mostly filled and verified from a host.
+
+```{r}
+res <- dbSendQuery(mydb,
+                   "SELECT host_id, host_name, host_verifications, host_identity_verified
+                   FROM host_info
+                   WHERE host_identity_verified IS NOT NULL"
+                   )
+
+out_db <- fetch(res, n = -1)
+dbClearResult(res)
+
+# Transform is_superhost into logical
+out_db <- out_db %>% 
+  mutate(host_identity_verified = as.logical(host_identity_verified))
+
+out_db
+```
+
+Let's check if there is any host that is not verified yet.
+
+```{r}
+out_db %>% 
+  filter(host_identity_verified == F)
+```
+
+There are a lot of host that is yet to be verified. Let's also check if there is any host that has missing value or no host_verification.
+
+```{r}
+out_db %>% 
+  filter(is.na(host_verifications))
+```
+
+Let's check the most commonly verified identity.
+
+```{r}
+out_db <- out_db %>% 
+  mutate(host_verifications = tolower(host_verifications))
+
+list_verification <- map(out_db$host_verifications, function(x) x %>% strsplit(", ") %>% unlist() ) %>% 
+  unlist()
+
+df_verify <- data.frame(verification = list_verification)
+```
+
+```{r}
+# Prepare top 15 amenities by ratio
+df_viz <- df_verify %>% 
+  count(verification, name = "frequency") %>% 
+  mutate(n_data = nrow(out_db),
+         ratio = frequency/nrow(out_db)) %>% 
+  arrange(desc(ratio)) %>% 
+  head(15)
+
+# Visualization
+df_viz %>% 
+  ggplot(aes(x = ratio,
+             y = verification %>% reorder(ratio))
+         ) +
+  geom_col(fill = "skyblue") +
+  scale_x_continuous(labels = percent_format()) +
+  labs(x = "Percentage of Host",
+       y = "Verified Identity",
+       title = "Commonly Verified Information")
+```
+
+Phone number and email are the most common way to verify a host and has been done by more than 80% of all hosts, followed by the governemnt id of the host.
+
+# Conclusion
+
+We have done some data analysis to better understand the information regarding the room listing and host from Airbnb in Bangkok. We have saw what is the most common room type available, is there any correlation between room price and the review score, who are the top 10 host, etc. You can continue further by building a beautiful analytics dashboard in Tableau or using any libraries from python, such as plotly dash, flask, or streamlit.
+
+Don't forget to close your database connection if you are finished.
+
+```{r}
+dbDisconnect(mydb)
+```
+
