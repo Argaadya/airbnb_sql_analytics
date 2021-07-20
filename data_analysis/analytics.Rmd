@@ -174,7 +174,8 @@ out_db %>%
   geom_col(fill = "skyblue") +
   labs(x = "Frequency",
        y = "Property Type",
-       title = "Property Type by Frequency in Bangkok, Thailand")
+       title = "Property Type by Frequency in Bangkok, Thailand") +
+  scale_x_continuous(labels = number_format(big.mark = ","))
 ```
 
 ## Property Type by Average Price
@@ -241,7 +242,8 @@ df_price_rank %>%
        y = NULL,
        fill = NULL,
        title = "Top and Bottom 10 Property by Average Price",
-       subtitle = "For property type with min. 50 different listings") 
+       subtitle = "For property type with min. 50 different listings") +
+  scale_x_continuous(labels = number_format(big.mark = ","))
 ```
 
 The most expensive property that is being listed is the entire villa, followed by entire house. Surprisingly, shared room in house has higher average price compared to other property. Meanwhile, on the bottom 10 the list is dominated by listing for private and shared room. However, we don't see listing for private room or entire apartment/condominium in the top and bottom 10, so we may conclude that the price for those listings is somewhere in the middle.
@@ -316,7 +318,7 @@ df_score_rank %>%
          ) + 
   geom_point() +
   geom_segment(aes(xend = 80, yend = property_type)) +
-  labs(x = "Average Price",
+  labs(x = "Average Review Scores Rating",
        y = NULL,
        color = NULL,
        title = "Top and Bottom 10 Property by Average Price",
