@@ -23,6 +23,8 @@ The following is the list of libraries that we will use throughout the article.
 ```{r message=FALSE}
 # Data Wrangling
 library(tidyverse)
+library(padr)
+library(lubridate)
 
 # Draw Map
 library(leaflet)
@@ -90,6 +92,7 @@ It's better for us to define what kind of insight that we want to draw from the 
 - Is there any difference in review score between superhost and normal host?
 - Is there any difference in response rate between superhost and normal host?
 - What is the most commonly verified host information?
+- How is the number of host joined to Airbnb over time?
 
 # Room Listing
 
@@ -763,6 +766,66 @@ df_viz %>%
 ```
 
 Phone number and email are the most common way to verify a host and has been done by more than 80% of all hosts, followed by the governemnt id of the host.
+
+## Number of Host Joined
+
+Let's check the number of joined monthly over time, see if there is interesting insights from this data. We will count the number of host joined by monthly period since counting daily frequencies may be too small window of time.
+
+```{r}
+query <- "SELECT MONTHNAME(host_since) as month, YEAR(host_since) as year,  COUNT(*) as frequency
+        FROM host_info
+        WHERE host_since IS NOT NULL
+        GROUP BY month, year"
+
+res <- dbSendQuery(mydb, query)
+out_db <- fetch(res) 
+dbClearResult(res)
+
+out_db %>% 
+  head(10)
+```
+
+Let's visualize this data using heatmap. To make the graph visually more appealing, we will pad the time period to start from the earliest month (January) of the earliest year and fill the number of host joined with 0 since there is no record of host from this period.
+
+```{r}
+df_viz <- out_db %>% 
+  mutate(date = paste0(year, "-", month, "-1") %>% 
+           ymd()
+         ) %>% 
+  pad(interval = "month",
+      start_val = ymd( paste0(min(.$year), "-1-1") )
+      ) %>% 
+  mutate(month = month(date, label = T, abbr = F),
+         year = year(date)
+         ) %>% 
+  replace_na(list(frequency = 0))
+
+df_viz %>% 
+  head(10)
+```
+
+Let's create the heatmap.
+
+```{r}
+df_viz %>% 
+  ggplot(aes(x = year,
+             y = month,
+             fill = frequency
+             )
+         ) +
+  geom_tile(color = "white") +
+  scale_x_continuous(breaks = seq(2000, 2025, 2) ) +
+  theme_minimal() +
+  theme(legend.position = "top") +
+  scale_fill_viridis_c(option = "B") +
+  labs(x = "Year",
+       y = NULL,
+       fill = "Frequency",
+       title = "Number of Host Joined Over Time"
+       ) 
+```
+
+Based on the heatmap, we can see that a large number of hosts started to join Airbnb from the year 2015, with the highest record of number of host joined in a single is on August 2015, September 2018, and October 2018. The number of new hosts are currently going down since April 2020, perhaps due to the global COVID-19 pandemic.
 
 # Conclusion
 

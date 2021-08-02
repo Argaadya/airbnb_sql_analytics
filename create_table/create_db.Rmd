@@ -69,7 +69,6 @@ After you have set up the mysql server, now you can connect into the server with
 - password
 - database name (dbname)
 
-
 ```{r eval=F}
 mydb <- dbConnect(MySQL(),
                   host = "db4free.net", # write "localhost" if you use a localhost
