@@ -56,3 +56,10 @@ The following is my research questions regarding the Airbnb Room Listing and Hos
 - Is there any difference in review score between superhost and normal host?
 - Is there any difference in response rate between superhost and normal host?
 - What is the most commonly verified host information?
+- How is the number of host joined to Airbnb over time?
+
+# Output
+
+- [Connect and Insert Data to MySQL Server with R](https://rpubs.com/Argaadya/create_table_sql)
+- [Airbnb Data Analysis](https://rpubs.com/Argaadya/airbnb_sql_analysis)
+- [Live Demo Shiny Dashboard](https://argaadya.shinyapps.io/airbnb_analytics/)
